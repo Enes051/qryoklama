@@ -12,11 +12,14 @@
     <nav class="nav-bar hidden" id="navbar">
         <div class="nav-brand">📱 QR Yoklama</div>
         <div class="user-info">
+            <div id="sync-status" class="text-muted" style="font-size: 0.7rem; margin-right: 1rem;">Bulut: Hazır</div>
             <span id="user-name-display"></span>
             <span class="status-badge" id="user-role-display"></span>
             <button class="btn btn-logout" onclick="logout()">Çıkış</button>
         </div>
     </nav>
+
+    <div id="debug-log" style="position: fixed; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.8); color: #00ff00; font-size: 10px; padding: 5px; z-index: 9999; max-height: 100px; overflow-y: auto; pointer-events: none; border-top: 1px solid #00ff00;">Sistem Başlatıldı...</div>
 
     <div class="container">
         
