@@ -232,13 +232,28 @@ function updateAttendanceListUI() {
 // --- STUDENT LOGIC ---
 async function joinWithPin() {
     const pin = els.manualPinInput.value;
-    if (!MOCK_DB.active_session?.active) { alert("Aktif yoklama yok!"); return; }
-    if (MOCK_DB.active_session.pin !== pin) { alert("Hatalı Kod!"); return; }
+    if (!pin) { alert("Lütfen kodu girin"); return; }
+
+    // FETCH LATEST FROM CLOUD
+    MOCK_DB = await getCloudDB();
+
+    if (!MOCK_DB.active_session?.active) { 
+        alert("Sanal veri tabanında aktif yoklama bulunamadı! Lütfen hocanızın yoklamayı başlattığından emin olun."); 
+        return; 
+    }
+    if (MOCK_DB.active_session.pin !== pin) {
+        alert("Girdiğiniz kod hatalı!");
+        return;
+    }
     await submitAttendanceRecord(MOCK_DB.active_session.qr_data);
 }
 
 async function simulateScan() {
-    if (!MOCK_DB.active_session?.active) { alert("Aktif yoklama yok!"); return; }
+    MOCK_DB = await getCloudDB();
+    if (!MOCK_DB.active_session?.active) { 
+        alert("Şu anda aktif bir bulut oturumu bulunamadı."); 
+        return; 
+    }
     await submitAttendanceRecord(MOCK_DB.active_session.qr_data);
 }
 
@@ -261,17 +276,22 @@ function startScanner() {
 }
 
 async function submitAttendanceRecord(qrData) {
+    // RE-FETCH again before saving to prevent data loss
+    MOCK_DB = await getCloudDB(); 
+
     if (MOCK_DB.active_session?.qr_data === qrData) {
         if (!MOCK_DB.records.includes(currentUser.id)) {
             MOCK_DB.records.push(currentUser.id);
             await saveCloudDB(MOCK_DB);
             els.scanSuccessMsg.classList.remove('hidden');
             els.manualPinInput.value = "";
+            alert("Yoklamanız başarıyla kaydedildi!");
         } else {
             alert("Zaten yoklamaya katıldınız!");
+            els.scanSuccessMsg.classList.remove('hidden');
         }
     } else {
-        alert("Geçersiz QR Kod!");
+        alert("Geçersiz veya süresi dolmuş bir QR kod!");
         els.btnStartScan.classList.remove('hidden');
     }
 }
