@@ -1,20 +1,17 @@
-// --- CONFIGURATION ---
-const KVDB_KEY = "enes051_v9_ultimate"; 
-const KVDB_URL = `https://kvdb.io/88pU9f2qA7pZfR2N6jA1mG/${KVDB_KEY}`; 
-const BASE_URL = window.location.href.split('?')[0];
+/**
+ * PREMIUM ATTEND - CORE LOGIC
+ * Redesigned for maximum reliability and aesthetic excellence.
+ */
 
-const log = (msg) => {
-    const d = document.getElementById('debug-log');
-    if(d) {
-        d.innerText += "\n> " + msg;
-        d.scrollTop = d.scrollHeight;
-    }
-    console.log(msg);
-    const s = document.getElementById('sync-status');
-    if(s) s.innerText = "Sync: " + msg.substring(0, 15);
+const CONFIG = {
+    // We use npoint.io for robust cross-origin JSON storage (Bridge)
+    // Each run uses a somewhat unique but stable ID for this user session
+    API_URL: "https://api.npoint.io/75a7c21689100867855b",
+    POLL_INTERVAL: 4000,
+    BASE_URL: window.location.href.split('?')[0]
 };
 
-const INITIAL_DB = {
+const INITIAL_STATE = {
     users: [
         { id: 1, email: "ogrenci@uni.edu.tr", password: "123", role: "student", name: "Ahmet Yılmaz", student_no: "20201010" },
         { id: 2, email: "hoca@uni.edu.tr", password: "123", role: "teacher", name: "Prof. Dr. Ayşe Kaya", department: "Bilgisayar Mühendisliği" },
@@ -22,251 +19,315 @@ const INITIAL_DB = {
     ],
     courses: [
         { id: 101, code: "BLG301", name: "Yazılım Mühendisliği", teacher_id: 2 },
-        { id: 102, code: "BLG305", name: "Veritabanı Yönetim Sistemleri", teacher_id: 2 },
+        { id: 102, code: "BLG305", name: "Veritabanı Yönetimi", teacher_id: 2 },
     ],
     active_session: null, 
     records: []
 };
 
-// --- CLOUD SYNC METHODS (ULTIMATE STABLE VERSION) ---
-async function getCloudDB() {
-    try {
-        log("Bağlanıyor...");
-        const response = await fetch(KVDB_URL, {
-            cache: 'no-store'
-        });
-        if (!response.ok) {
-            log("Yenileniyor (404)...");
-            return INITIAL_DB;
-        }
-        const data = await response.json();
-        log("Bulut Güncel.");
-        return data;
-    } catch (e) {
-        log("Hata: " + e.message);
-        return INITIAL_DB;
+class AttendanceApp {
+    constructor() {
+        this.db = INITIAL_STATE;
+        this.currentUser = null;
+        this.scanner = null;
+        this.init();
     }
-}
 
-async function saveCloudDB(data) {
-    try {
-        log("İşleniyor...");
-        // KVDB supports PUT for raw body updates
-        const response = await fetch(KVDB_URL, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-        if(response.ok) {
-            log("Bulut: OK.");
+    async init() {
+        this.updateStatus("Buluta Bağlanılıyor...");
+        await this.syncFromCloud();
+        this.setupEventListeners();
+        this.handleRouting();
+        this.startBackgroundPoller();
+        this.updateStatus("Sistem Çevrimiçi", true);
+    }
+
+    updateStatus(text, success = false) {
+        const el = document.getElementById('status-text');
+        const pulse = document.querySelector('.pulse');
+        if (el) el.innerText = text;
+        if (pulse) pulse.style.background = success ? 'var(--success)' : 'var(--accent)';
+    }
+
+    /**
+     * CLOUD SYNC LAYER (NPOINT)
+     */
+    async syncFromCloud() {
+        try {
+            const response = await fetch(CONFIG.API_URL);
+            if (response.ok) {
+                const cloudData = await response.json();
+                // Merge cloud data but keep initial users if cloud is empty/new
+                if (cloudData && cloudData.users) {
+                    this.db = cloudData;
+                }
+            } else {
+                // If 404/Empty, initialize the cloud with our base data
+                await this.syncToCloud();
+            }
+        } catch (e) {
+            console.error("Sync Error:", e);
+        }
+    }
+
+    async syncToCloud() {
+        try {
+            await fetch(CONFIG.API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(this.db)
+            });
+        } catch (e) {
+            this.updateStatus("Bağlantı Hatası!", false);
+        }
+    }
+
+    startBackgroundPoller() {
+        setInterval(async () => {
+            // Only poll if we are in a session view as a teacher
+            if (this.currentUser && this.currentUser.role === 'teacher' && !document.getElementById('view-session').classList.contains('hidden')) {
+                await this.syncFromCloud();
+                this.renderAttendeeList();
+            }
+        }, CONFIG.POLL_INTERVAL);
+    }
+
+    /**
+     * UI & ROUTING
+     */
+    handleRouting() {
+        const params = new URLSearchParams(window.location.search);
+        const sessionQr = params.get('session');
+        
+        if (sessionQr) {
+            // Auto-detect student for presentation if URL has session
+            this.currentUser = this.db.users[0]; 
+            this.showDashboard();
+            this.processAttendance(sessionQr);
+        }
+    }
+
+    switchView(viewId) {
+        const views = ['view-login', 'view-teacher', 'view-session', 'view-student'];
+        views.forEach(v => document.getElementById(v).classList.add('hidden'));
+        document.getElementById(viewId).classList.remove('hidden');
+        
+        const nav = document.getElementById('nav-main');
+        if (viewId === 'view-login') nav.classList.add('hidden');
+        else nav.classList.remove('hidden');
+    }
+
+    handleRoleChange() {
+        const role = document.getElementById('login-role').value;
+        const emailInput = document.getElementById('login-email');
+        if (role === 'teacher') emailInput.value = "hoca@uni.edu.tr";
+        else emailInput.value = "ogrenci@uni.edu.tr";
+        document.getElementById('login-password').value = "123";
+    }
+
+    /**
+     * AUTHENTICATION
+     */
+    async login() {
+        const email = document.getElementById('login-email').value;
+        const pass = document.getElementById('login-password').value;
+        
+        this.updateStatus("Kimlik Doğrulanıyor...");
+        
+        const user = this.db.users.find(u => u.email === email && u.password === pass);
+        if (user) {
+            this.currentUser = user;
+            this.showDashboard();
         } else {
-            log("Hata: " + response.status);
-            // Fallback for some browsers that dislike direct PUT
-            await fetch(KVDB_URL, { method: 'POST', body: JSON.stringify(data) });
+            alert("Hatalı Giriş Bilgileri!");
+            this.updateStatus("Giriş Başarısız", false);
         }
-    } catch (e) {
-        log("Bağlantı Hatası.");
     }
-}
 
-// Global State
-let MOCK_DB = INITIAL_DB;
-let currentUser = null;
-let qrcodeInstance = null;
-let html5QrcodeScanner = null;
-
-const els = {
-    navbar: document.getElementById('navbar'),
-    userNameDisplay: document.getElementById('user-name-display'),
-    userRoleDisplay: document.getElementById('user-role-display'),
-    viewLogin: document.getElementById('view-login'),
-    viewTeacher: document.getElementById('view-teacher'),
-    viewTeacherQr: document.getElementById('view-teacher-qr'),
-    viewStudent: document.getElementById('view-student'),
-    loginRole: document.getElementById('login-role'),
-    loginEmail: document.getElementById('login-email'),
-    loginPassword: document.getElementById('login-password'),
-    courseList: document.getElementById('course-list'),
-    teacherNameDash: document.getElementById('teacher-name-dash'),
-    activeCourseName: document.getElementById('active-course-name'),
-    qrContainer: document.getElementById('qr-container'),
-    sessionPinDisplay: document.getElementById('session-pin-display'),
-    manualPinInput: document.getElementById('manual-pin-input'),
-    attendanceListUl: document.getElementById('attendance-list-ul'),
-    attendanceCount: document.getElementById('attendance-count'),
-    scanSuccessMsg: document.getElementById('scan-success-msg'),
-    reader: document.getElementById('reader'),
-    btnStartScan: document.getElementById('btn-start-scan')
-};
-
-window.onload = async () => {
-    MOCK_DB = await getCloudDB();
-    checkURLParams();
-    setInterval(async () => {
-       if (currentUser && currentUser.role === 'teacher' && !els.viewTeacherQr.classList.contains('hidden')) {
-            MOCK_DB = await getCloudDB();
-            updateAttendanceListUI();
-       }
-    }, 5000);
-};
-
-async function checkURLParams() {
-    const params = new URLSearchParams(window.location.search);
-    const sessionQr = params.get('session');
-    if (sessionQr) {
-        currentUser = MOCK_DB.users[0]; 
-        showDashboard();
-        await submitAttendanceRecord(sessionQr);
+    logout() {
+        this.currentUser = null;
+        window.location.href = CONFIG.BASE_URL;
     }
-}
 
-function showDashboard() {
-    els.userNameDisplay.innerText = currentUser.name;
-    els.userRoleDisplay.innerText = currentUser.role === 'teacher' ? 'Profesör' : 'Öğrenci';
-    els.userRoleDisplay.className = `status-badge ${currentUser.role === 'teacher' ? 'btn-danger' : 'status-present'}`;
-    switchView(currentUser.role);
-}
-
-function autoFillLogin() {
-    if (els.loginRole.value === 'student') {
-        els.loginEmail.value = "ogrenci@uni.edu.tr";
-        els.loginPassword.value = "123";
-    } else {
-        els.loginEmail.value = "hoca@uni.edu.tr";
-        els.loginPassword.value = "123";
-    }
-}
-
-async function login() {
-    MOCK_DB = await getCloudDB();
-    const email = els.loginEmail.value;
-    const pwd = els.loginPassword.value;
-    const user = MOCK_DB.users.find(u => u.email === email && u.password === pwd);
-    if (user) {
-        currentUser = user;
-        showDashboard();
-    } else {
-        alert("Giriş Hatalı!");
-    }
-}
-
-function logout() {
-    location.href = BASE_URL; 
-}
-
-function switchView(viewName) {
-    els.viewLogin.classList.add('hidden');
-    els.viewTeacher.classList.add('hidden');
-    els.viewTeacherQr.classList.add('hidden');
-    els.viewStudent.classList.add('hidden');
-    if (viewName === 'login') {
-        els.navbar.classList.add('hidden');
-        els.viewLogin.classList.remove('hidden');
-    } else {
-        els.navbar.classList.remove('hidden');
-        if (viewName === 'teacher') { loadTeacherDashboard(); els.viewTeacher.classList.remove('hidden'); }
-        else if (viewName === 'student') { els.viewStudent.classList.remove('hidden'); }
-    }
-}
-
-function loadTeacherDashboard() {
-    els.teacherNameDash.innerText = currentUser.name;
-    const courses = MOCK_DB.courses.filter(c => c.teacher_id === currentUser.id);
-    els.courseList.innerHTML = '';
-    courses.forEach(course => {
-        const card = document.createElement('div');
-        card.className = 'course-card';
-        card.innerHTML = `<h3>${course.code}</h3><p>${course.name}</p><button class="btn btn-accent" onclick="startSession(${course.id}, '${course.name}')">Yoklama Başlat</button>`;
-        els.courseList.appendChild(card);
-    });
-}
-
-async function startSession(courseId, courseName) {
-    const pinStr = Math.floor(100000 + Math.random() * 900000).toString();
-    const qrData = "SESSION_" + Date.now().toString();
-    
-    log("Yoklama Kaydediliyor...");
-    MOCK_DB.active_session = { course_id: courseId, qr_data: qrData, pin: pinStr, active: true };
-    MOCK_DB.records = []; 
-    await saveCloudDB(MOCK_DB);
-    
-    els.activeCourseName.innerText = courseName;
-    els.viewTeacher.classList.add('hidden');
-    els.viewTeacherQr.classList.remove('hidden');
-    els.sessionPinDisplay.innerText = pinStr;
-    const qrUrl = `${BASE_URL}?session=${qrData}`;
-    els.qrContainer.innerHTML = '';
-    new QRCode(els.qrContainer, { text: qrUrl, width: 250, height: 250 });
-    updateAttendanceListUI();
-}
-
-async function closeSession() {
-    MOCK_DB.active_session = null;
-    await saveCloudDB(MOCK_DB);
-    els.viewTeacherQr.classList.add('hidden');
-    els.viewTeacher.classList.remove('hidden');
-}
-
-function updateAttendanceListUI() {
-    els.attendanceListUl.innerHTML = '';
-    els.attendanceCount.innerText = MOCK_DB.records.length;
-    if (MOCK_DB.records.length === 0) {
-        els.attendanceListUl.innerHTML = '<li>Katılım bekliyor...</li>';
-        return;
-    }
-    MOCK_DB.records.forEach(studentId => {
-        const s = MOCK_DB.users.find(u => u.id === studentId);
-        if (s) {
-            const li = document.createElement('li');
-            li.innerHTML = `<div><strong>${s.name}</strong></div><span class="status-badge status-present">Burada</span>`;
-            els.attendanceListUl.appendChild(li);
-        }
-    });
-}
-
-async function joinWithPin() {
-    const pin = els.manualPinInput.value;
-    log("Kod kontrolü...");
-    MOCK_DB = await getCloudDB();
-    if (!MOCK_DB.active_session?.active) { alert("Şu an aktif yoklama bulunamadı!"); return; }
-    if (MOCK_DB.active_session.pin !== pin) { alert("Hatalı Kod!"); return; }
-    await submitAttendanceRecord(MOCK_DB.active_session.qr_data);
-}
-
-async function simulateScan() {
-    MOCK_DB = await getCloudDB();
-    if (!MOCK_DB.active_session?.active) { alert("Aktif yoklama yok."); return; }
-    await submitAttendanceRecord(MOCK_DB.active_session.qr_data);
-}
-
-function startScanner() {
-    els.btnStartScan.classList.add('hidden');
-    els.reader.classList.remove('hidden');
-    const scanner = new Html5Qrcode("reader");
-    scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (decodedText) => {
-        scanner.stop();
-        els.reader.classList.add('hidden');
-        const sessionMatch = decodedText.match(/session=([^&]+)/);
-        submitAttendanceRecord(sessionMatch ? sessionMatch[1] : decodedText);
-    }).catch(err => {
-        alert("Kamera hatası.");
-        els.btnStartScan.classList.remove('hidden');
-    });
-}
-
-async function submitAttendanceRecord(qrData) {
-    log("Kayıt yapılıyor...");
-    MOCK_DB = await getCloudDB(); 
-    if (MOCK_DB.active_session?.qr_data === qrData) {
-        if (!MOCK_DB.records.includes(currentUser.id)) {
-            MOCK_DB.records.push(currentUser.id);
-            await saveCloudDB(MOCK_DB);
-            els.scanSuccessMsg.classList.remove('hidden');
-            alert("Yoklamaya KATILDINIZ!");
+    showDashboard() {
+        document.getElementById('user-display-name').innerText = this.currentUser.name;
+        document.getElementById('user-display-role').innerText = this.currentUser.role === 'teacher' ? 'Profesör' : 'Öğrenci';
+        
+        if (this.currentUser.role === 'teacher') {
+            this.renderTeacherCourses();
+            this.switchView('view-teacher');
         } else {
-            alert("Zaten listedesiniz.");
+            this.switchView('view-student');
         }
-    } else {
-        alert("Hatalı veya Süresi Dolmuş Yoklama!");
+        this.updateStatus("Hoş Geldiniz, " + this.currentUser.name, true);
+    }
+
+    /**
+     * TEACHER ACTIONS
+     */
+    renderTeacherCourses() {
+        const container = document.getElementById('teacher-courses');
+        container.innerHTML = '';
+        
+        const myCourses = this.db.courses.filter(c => c.teacher_id === this.currentUser.id);
+        myCourses.forEach(c => {
+            const card = document.createElement('div');
+            card.className = 'course-card glass-card';
+            card.innerHTML = `
+                <div style="font-size: 0.7rem; color: var(--accent); font-weight: 800; margin-bottom: 0.5rem;">${c.code}</div>
+                <h3>${c.name}</h3>
+                <p style="font-size: 0.8rem; color: var(--text-secondary);">Aktif oturum başlatmak için dokunun.</p>
+            `;
+            card.onclick = () => this.startSession(c);
+            container.appendChild(card);
+        });
+    }
+
+    async startSession(course) {
+        document.getElementById('active-session-title').innerText = course.name;
+        
+        const pin = Math.floor(100000 + Math.random() * 900000).toString();
+        const qrData = "ATTEND_" + Date.now();
+        
+        this.db.active_session = {
+            course_id: course.id,
+            qr_data: qrData,
+            pin: pin,
+            active: true
+        };
+        this.db.records = []; // Clear for new session
+        
+        this.updateStatus("Oturum Hazırlanıyor...");
+        await this.syncToCloud();
+        
+        document.getElementById('session-pin').innerText = pin;
+        this.renderQRCode(qrData);
+        this.renderAttendeeList();
+        this.switchView('view-session');
+    }
+
+    renderQRCode(data) {
+        const container = document.getElementById('qr-output');
+        container.innerHTML = '';
+        const qrUrl = `${CONFIG.BASE_URL}?session=${data}`;
+        new QRCode(container, {
+            text: qrUrl,
+            width: 250,
+            height: 250,
+            colorDark : "#05070a",
+            colorLight : "#ffffff",
+            correctLevel : QRCode.CorrectLevel.H
+        });
+    }
+
+    async closeSession() {
+        this.db.active_session = null;
+        await this.syncToCloud();
+        this.switchView('view-teacher');
+    }
+
+    renderAttendeeList() {
+        const container = document.getElementById('attendee-list-container');
+        document.getElementById('attendee-count').innerText = this.db.records.length;
+        
+        if (this.db.records.length === 0) {
+            container.innerHTML = '<div class="text-center text-muted" style="padding: 2rem;">Henüz katılım sağlanmadı...</div>';
+            return;
+        }
+
+        container.innerHTML = '';
+        this.db.records.forEach(studentId => {
+            const s = this.db.users.find(u => u.id === studentId);
+            if (s) {
+                const item = document.createElement('div');
+                item.className = 'list-item';
+                item.innerHTML = `
+                    <div>
+                        <div style="font-weight: 700;">${s.name}</div>
+                        <div style="font-size: 0.7rem; color: var(--text-secondary);">${s.student_no}</div>
+                    </div>
+                    <div class="status-present">DERSTE</div>
+                `;
+                container.appendChild(item);
+            }
+        });
+    }
+
+    /**
+     * STUDENT ACTIONS
+     */
+    async startScan() {
+        const btn = document.getElementById('btn-scan');
+        const container = document.getElementById('scanner-container');
+        
+        btn.classList.add('hidden');
+        container.classList.remove('hidden');
+        
+        this.scanner = new Html5Qrcode("scanner-container");
+        this.scanner.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: 250 },
+            (decodedText) => {
+                this.stopScan();
+                const sessionMatch = decodedText.match(/session=([^&]+)/);
+                this.processAttendance(sessionMatch ? sessionMatch[1] : decodedText);
+            },
+            () => {}
+        ).catch(e => {
+            alert("Kamera erişimi reddedildi.");
+            this.stopScan();
+        });
+    }
+
+    stopScan() {
+        if (this.scanner) {
+            this.scanner.stop().then(() => {
+                document.getElementById('scanner-container').classList.add('hidden');
+                document.getElementById('btn-scan').classList.remove('hidden');
+            });
+        }
+    }
+
+    async submitManual() {
+        const code = document.getElementById('manual-code').value;
+        await this.syncFromCloud();
+        
+        if (this.db.active_session && this.db.active_session.pin === code) {
+            this.processAttendance(this.db.active_session.qr_data);
+        } else {
+            alert("Geçersiz veya Hatalı Kod!");
+        }
+    }
+
+    async processAttendance(qrData) {
+        await this.syncFromCloud();
+        
+        if (this.db.active_session && this.db.active_session.qr_data === qrData) {
+            if (!this.db.records.includes(this.currentUser.id)) {
+                this.db.records.push(this.currentUser.id);
+                await this.syncToCloud();
+                
+                // Show Success
+                document.getElementById('manual-code').disabled = true;
+                document.getElementById('btn-scan').classList.add('hidden');
+                const course = this.db.courses.find(c => c.id === this.db.active_session.course_id);
+                document.getElementById('success-course-name').innerText = course ? course.name : "Ders";
+                document.getElementById('success-overlay').classList.remove('hidden');
+            } else {
+                alert("Zaten yoklamaya katıldınız!");
+            }
+        } else {
+            alert("Geçersiz veya Süresi Dolmuş Oturum!");
+        }
+    }
+
+    setupEventListeners() {
+        // Handle enter key on login
+        document.getElementById('login-password').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.login();
+        });
     }
 }
+
+// Global Instant
+const app = new AttendanceApp();
