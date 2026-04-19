@@ -1,6 +1,6 @@
 // --- CONFIGURATION ---
-const PANTRY_ID = "25b5c739-9d95-4604-bb7a-6415482390f0"; 
-const BASKET_NAME = "qr_v3_sync"; // Changed basket name to ensure a fresh one
+const BUCKET_ID = "enes051_qr_v5_final"; // SABİT ID: Telefon ve PC'nin birbirini görmesi için bu aynı kalmalı
+const KVDB_URL = `https://kvdb.io/88pU9f2qA7pZfR2N6jA1mG/${BUCKET_ID}`; 
 const BASE_URL = window.location.href.split('?')[0];
 
 const log = (msg) => {
@@ -11,7 +11,7 @@ const log = (msg) => {
     }
     console.log(msg);
     const s = document.getElementById('sync-status');
-    if(s) s.innerText = "Bulut: " + msg.substring(0, 15);
+    if(s) s.innerText = "Sistem: " + msg.substring(0, 15);
 };
 
 const INITIAL_DB = {
@@ -28,20 +28,20 @@ const INITIAL_DB = {
     records: []
 };
 
-// --- CLOUD SYNC METHODS ---
+// --- CLOUD SYNC METHODS (KVDB Implementation) ---
 async function getCloudDB() {
     try {
-        log("Veri çekiliyor...");
-        const response = await fetch(`https://getpantry.cloud/apiv1/pantry/${PANTRY_ID}/basket/${BASKET_NAME}`);
+        log("Veri senkronize ediliyor...");
+        const response = await fetch(KVDB_URL);
         if (!response.ok) {
-            log("Veri yok, başlangıç yükleniyor (404 normal)");
+            log("Veri henüz yok, başlangıç modu.");
             return INITIAL_DB;
         }
         const data = await response.json();
-        log("Veri başarıyla çekildi.");
+        log("Bulut verisi güncellendi.");
         return data;
     } catch (e) {
-        log("HATA (Çekme): " + e.message);
+        log("Bağlantı bekleniyor...");
         return INITIAL_DB;
     }
 }
@@ -49,19 +49,17 @@ async function getCloudDB() {
 async function saveCloudDB(data) {
     try {
         log("Buluta kaydediliyor...");
-        const response = await fetch(`https://getpantry.cloud/apiv1/pantry/${PANTRY_ID}/basket/${BASKET_NAME}`, {
+        const response = await fetch(KVDB_URL, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         });
         if(response.ok) {
             log("Başarıyla kaydedildi.");
         } else {
-            log("Sunucu hatası: " + response.status);
+            log("Bulut Kayıt Hatası: " + response.status);
         }
     } catch (e) {
-        log("HATA (Kaydetme): " + e.message);
-        alert("Bağlantı Hatası! Lütfen internetinizi kontrol edin.");
+        log("HATA: İnternet bağlantısını kontrol edin.");
     }
 }
 
@@ -70,7 +68,6 @@ let MOCK_DB = INITIAL_DB;
 let currentUser = null;
 let qrcodeInstance = null;
 let html5QrcodeScanner = null;
-let pollInterval = null;
 
 const els = {
     navbar: document.getElementById('navbar'),
@@ -99,6 +96,7 @@ const els = {
 window.onload = async () => {
     MOCK_DB = await getCloudDB();
     checkURLParams();
+    // Otomatik güncelleme (Öğretmen listesi için)
     setInterval(async () => {
        if (currentUser && currentUser.role === 'teacher' && !els.viewTeacherQr.classList.contains('hidden')) {
             MOCK_DB = await getCloudDB();
@@ -111,7 +109,7 @@ async function checkURLParams() {
     const params = new URLSearchParams(window.location.search);
     const sessionQr = params.get('session');
     if (sessionQr) {
-        log("QR Linki algılandı...");
+        log("QR Girişi algılandı, otomatik katılım başlatılıyor...");
         currentUser = MOCK_DB.users[0]; 
         showDashboard();
         submitAttendanceRecord(sessionQr);
@@ -136,6 +134,7 @@ function autoFillLogin() {
 }
 
 async function login() {
+    log("Giriş yapılıyor...");
     MOCK_DB = await getCloudDB();
     const user = MOCK_DB.users.find(u => u.email === els.loginEmail.value && u.password === els.loginPassword.value);
     if (user) {
@@ -147,7 +146,7 @@ async function login() {
 }
 
 function logout() {
-    location.href = BASE_URL; // Hard reload
+    location.href = BASE_URL; 
 }
 
 function switchView(viewName) {
@@ -178,9 +177,11 @@ function loadTeacherDashboard() {
 }
 
 async function startSession(courseId, courseName) {
-    log("Yoklama oturumu oluşturuluyor...");
+    log("Yoklama oturumu başlatılıyor...");
     const pinStr = Math.floor(100000 + Math.random() * 900000).toString();
     const qrData = "SESSION_" + Date.now().toString() + "_" + courseId;
+    
+    // Veritabanını hazırla
     MOCK_DB.active_session = { course_id: courseId, qr_data: qrData, pin: pinStr, active: true };
     MOCK_DB.records = []; 
     await saveCloudDB(MOCK_DB);
@@ -206,7 +207,7 @@ function updateAttendanceListUI() {
     els.attendanceListUl.innerHTML = '';
     els.attendanceCount.innerText = MOCK_DB.records.length;
     if (MOCK_DB.records.length === 0) {
-        els.attendanceListUl.innerHTML = '<li>Henüz kimse yok...</li>';
+        els.attendanceListUl.innerHTML = '<li>Katılım bekleniyor...</li>';
         return;
     }
     MOCK_DB.records.forEach(studentId => {
@@ -221,16 +222,16 @@ function updateAttendanceListUI() {
 
 async function joinWithPin() {
     const pin = els.manualPinInput.value;
-    log("PIN Kontrol ediliyor: " + pin);
+    log("Kod kontrol ediliyor...");
     MOCK_DB = await getCloudDB();
-    if (!MOCK_DB.active_session?.active) { alert("Aktif yoklama bulunamadı!"); return; }
-    if (MOCK_DB.active_session.pin !== pin) { alert("Kod Hatalı!"); return; }
+    if (!MOCK_DB.active_session?.active) { alert("Sistemde şu an aktif bir yoklama yok!"); return; }
+    if (MOCK_DB.active_session.pin !== pin) { alert("Girdiğiniz kod hatalı!"); return; }
     await submitAttendanceRecord(MOCK_DB.active_session.qr_data);
 }
 
 async function simulateScan() {
     MOCK_DB = await getCloudDB();
-    if (!MOCK_DB.active_session?.active) { alert("Aktif oturum yok."); return; }
+    if (!MOCK_DB.active_session?.active) { alert("Aktif yoklama yok."); return; }
     await submitAttendanceRecord(MOCK_DB.active_session.qr_data);
 }
 
@@ -244,26 +245,24 @@ function startScanner() {
         const sessionMatch = decodedText.match(/session=([^&]+)/);
         submitAttendanceRecord(sessionMatch ? sessionMatch[1] : decodedText);
     }).catch(err => {
-        log("Kamera Hatası: " + err);
-        alert("Kamera açılamadı.");
+        alert("Kamera başlatılamadı.");
         els.btnStartScan.classList.remove('hidden');
     });
 }
 
 async function submitAttendanceRecord(qrData) {
-    log("Yoklama işleniyor: " + qrData);
+    log("Yoklama gönderiliyor...");
     MOCK_DB = await getCloudDB(); 
     if (MOCK_DB.active_session?.qr_data === qrData) {
         if (!MOCK_DB.records.includes(currentUser.id)) {
             MOCK_DB.records.push(currentUser.id);
             await saveCloudDB(MOCK_DB);
             els.scanSuccessMsg.classList.remove('hidden');
-            alert("Yoklamanız ALINDI!");
+            alert("Yoklamanız Başarıyla Alındı!");
         } else {
-            alert("Zaten listedesiniz.");
+            alert("Zaten yoklamada varsınız.");
         }
     } else {
-        log("Hatalı QR veya Süre Dolmuş.");
-        alert("Bu QR geçersiz!");
+        alert("Geçersiz QR Kod!");
     }
 }
