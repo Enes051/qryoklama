@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Üniversite QR Yoklama Sistemi</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <nav class="nav-bar hidden" id="navbar">
+        <div class="nav-brand">📱 QR Yoklama</div>
+        <div class="user-info">
+            <span id="user-name-display"></span>
+            <span class="status-badge" id="user-role-display"></span>
+            <button class="btn btn-logout" onclick="logout()">Çıkış</button>
+        </div>
+    </nav>
+
+    <div class="container">
+        
+        <!-- LOGIN VIEW -->
+        <div id="view-login" class="card" style="max-width: 400px; margin: auto;">
+            <h2 class="text-center">Sisteme Giriş</h2>
+            <p class="text-center text-muted" style="margin-bottom: 2rem;">Üniversite Yoklama Sistemi</p>
+            
+            <div class="form-group">
+                <label>Rol Seçimi</label>
+                <select id="login-role" onchange="autoFillLogin()">
+                    <option value="student">Öğrenci Girişi</option>
+                    <option value="teacher">Öğretmen Girişi</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label>E-Posta</label>
+                <input type="email" id="login-email" value="ogrenci@uni.edu.tr">
+            </div>
+            <div class="form-group">
+                <label>Şifre</label>
+                <input type="password" id="login-password" value="123456">
+            </div>
+            <button class="btn" onclick="login()">Giriş Yap</button>
+        </div>
+
+        <!-- TEACHER DASHBOARD VIEW -->
+        <div id="view-teacher" class="hidden">
+            <div class="card" style="margin-bottom: 2rem;">
+                <h2>Hoş Geldiniz, <span id="teacher-name-dash"></span></h2>
+                <p class="text-muted">Lütfen yoklama başlatmak istediğiniz dersi seçili olanlar arasından belirleyin.</p>
+            </div>
+            
+            <div class="grid" id="course-list">
+                <!-- Courses injected via JS -->
+            </div>
+        </div>
+
+        <!-- TEACHER QR VIEW -->
+        <div id="view-teacher-qr" class="hidden text-center card" style="max-width: 600px; margin: auto;">
+            <h2><span id="active-course-name"></span> - Yoklama Aktif</h2>
+            <p class="text-muted">Öğrencilerin derse katılmak için kamerasından QR kodu taraması <b>ya da</b> ekrandaki katılım anahatarını girmesi gerekmektedir.</p>
+            
+            <div id="qr-container"></div>
+            
+            <div style="background: rgba(59, 130, 246, 0.1); border: 2px dashed var(--primary); padding: 1.5rem; border-radius: 1rem; margin: 1rem 0;">
+                <p class="text-muted" style="margin-bottom: 0.5rem; font-size: 0.9rem;">Manuel Katılım Anahtarı</p>
+                <div id="session-pin-display" style="font-size: 2.5rem; font-weight: bold; letter-spacing: 5px; color: var(--primary);">000000</div>
+            </div>
+
+            <br>
+            <button class="btn btn-danger" style="max-width: 200px;" onclick="closeSession()">Yoklamayı Bitir</button>
+
+            <h3 style="margin-top: 2rem; text-align:left; border-top: 1px solid var(--border); padding-top: 1rem;">
+                Anlık Katılım Listesi (<span id="attendance-count">0</span>)
+            </h3>
+            <ul class="attendance-list" id="attendance-list-ul">
+                <!-- Student list injected via JS -->
+            </ul>
+        </div>
+
+        <!-- STUDENT DASHBOARD VIEW -->
+        <div id="view-student" class="hidden card text-center" style="max-width: 500px; margin: auto;">
+            <h2>Ders Yoklamasına Katıl</h2>
+            <p class="text-muted" style="margin-bottom: 2rem;">Kameranızı açarak QR kodu okutun veya hocanızın ekrana yansıttığı <b>6 Haneli Katılım Anahtarını</b> girin.</p>
+            
+            <div style="background: var(--surface-hover); padding: 1.5rem; border-radius: 1rem; margin-bottom: 1.5rem;">
+                <label style="display:block; margin-bottom:0.8rem; font-size:0.9rem; color:var(--text-muted);">Anahtar ile Katılım (Kamera Çalışmazsa)</label>
+                <div style="display: flex; gap: 0.5rem; justify-content: center;">
+                    <input type="text" id="manual-pin-input" placeholder="000 000" maxlength="6" style="text-align:center; font-size: 1.5rem; letter-spacing: 3px; max-width: 150px; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 0.5rem; padding: 0.5rem;" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+                    <button class="btn btn-primary" style="width: auto;" onclick="joinWithPin()">Onayla</button>
+                </div>
+            </div>
+
+            <div id="reader" class="hidden"></div>
+            
+            <button class="btn btn-accent" id="btn-start-scan" onclick="startScanner()">Kamerayı Aç ve QR Tara</button>
+            <br><br>
+            <button class="btn" style="background-color: transparent; border: 1px solid var(--border); font-size: 0.8rem; padding: 0.5rem;" onclick="simulateScan()">[Sunum Modu Eğitmen Testi] Şifresiz Katıl</button>
+            
+            <div id="scan-success-msg" class="hidden" style="margin-top: 2rem; color: var(--accent); font-weight: bold; font-size:1.2rem; background: rgba(16, 185, 129, 0.1); padding: 1rem; border-radius: 0.5rem; border: 1px solid var(--accent);">
+                ✓ <br>Yoklamaya Başarıyla Katıldınız!
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <script src="app.js"></script>
+</body>
+</html>
