@@ -5,7 +5,7 @@ pip install -r requirements.txt
 ```
 
 ### 2. Veritabanını Hazırlayın
-Örnek verileri (Öğretmen ve Öğrenci hesapları) oluşturmak için:
+ Öğretmen ve Öğrenci hesapları oluşturmak için:
 ```powershell
 python -m backend.seed_data
 ```
@@ -24,5 +24,5 @@ Tarayıcınızdan `frontend/index.html` dosyasını açın ve şu bilgilerle gir
 - Şifre: 123
 
 **Öğrenci Hesabı:**
-- E-posta: ufuk@uni.edu.tr boran@uni.edu.tr enes@uni.edu.tr
+- E-posta: ufuk@uni.edu.tr, boran@uni.edu.tr, enes@uni.edu.tr
 - Şifre: 123
