@@ -35,20 +35,13 @@ class AttendanceApp {
     }
 
     async init() {
-        this.updateStatus("SQL Sistemine Bağlanılıyor...");
         await this.syncFromCloud();
         this.setupEventListeners();
         this.handleRouting();
         this.startBackgroundPoller();
-        this.updateStatus("Sistem Aktif (SQL)", true);
     }
 
-    updateStatus(text, success = false) {
-        const el = document.getElementById('status-text');
-        const pulse = document.querySelector('.pulse');
-        if (el) el.innerText = text;
-        if (pulse) pulse.style.background = success ? 'var(--success)' : 'var(--accent)';
-    }
+
 
     /**
      * SQL CLOUD SYNC
@@ -110,7 +103,6 @@ class AttendanceApp {
         const sessionQr = params.get('session');
         if (sessionQr) {
             sessionStorage.setItem('pending_session', sessionQr);
-            this.updateStatus("QR Bağlantısı Algılandı");
             this.switchView('view-login');
         }
     }
@@ -144,7 +136,6 @@ class AttendanceApp {
         const email = document.getElementById('login-email').value;
         const pass = document.getElementById('login-password').value;
         
-        this.updateStatus("Doğrulanıyor...");
         await this.syncFromCloud();
         
         const user = this.db.users.find(u => u.email === email && u.password === pass);
@@ -156,13 +147,11 @@ class AttendanceApp {
             // Handle pending QR session
             const pendingSession = sessionStorage.getItem('pending_session');
             if (pendingSession && user.role === 'student') {
-                this.updateStatus("Yoklama İşleniyor...");
                 await this.processAttendance(pendingSession);
                 sessionStorage.removeItem('pending_session');
             }
         } else {
             alert("Giriş Hatalı! Lütfen bilgilerinizi kontrol edin.");
-            this.updateStatus("Giriş Başarısız", false);
         }
     }
 

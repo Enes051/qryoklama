@@ -1,7 +1,12 @@
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
-import datetime
+from datetime import datetime, timedelta, timezone
 from .database import Base
+
+# Turkey Timezone (UTC+3)
+TRT = timezone(timedelta(hours=3))
+def get_now():
+    return datetime.now(TRT)
 
 class User(Base):
     __tablename__ = "users"
@@ -31,7 +36,7 @@ class AttendanceSession(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     course_id = Column(Integer, ForeignKey("courses.id"))
-    date = Column(DateTime, default=datetime.datetime.utcnow)
+    date = Column(DateTime, default=get_now)
     qr_data = Column(String, unique=True, index=True)
     is_active = Column(Boolean, default=True)
 
@@ -44,7 +49,7 @@ class AttendanceRecord(Base):
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(Integer, ForeignKey("attendance_sessions.id"))
     student_id = Column(Integer, ForeignKey("users.id"))
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    timestamp = Column(DateTime, default=get_now)
     status = Column(String, default="Present")
 
     session = relationship("AttendanceSession", back_populates="records")

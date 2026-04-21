@@ -24,6 +24,10 @@ try {
     $pdo = new PDO("mysql:host=$host;dbname=$db_name;charset=utf8", $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    
+    // Set Timezone for PHP and MySQL Session
+    date_default_timezone_set('Europe/Istanbul');
+    $pdo->exec("SET time_zone = '+03:00'");
 } catch (PDOException $e) {
     echo json_encode(['error' => 'Bağlantı Hatası: ' . $e->getMessage()]);
     exit;
