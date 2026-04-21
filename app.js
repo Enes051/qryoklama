@@ -1,3 +1,7 @@
+/**
+ * PREMIUM ATTEND - SQL EDITION
+ * Synchronized with Hostinger MySQL Database.
+ */
 
 const CONFIG = {
     API_URL: "./sync.php",
@@ -5,6 +9,7 @@ const CONFIG = {
     BASE_URL: window.location.href.split('?')[0]
 };
 
+// INITIAL_STATE only as a fallback for the very first run
 const INITIAL_STATE = {
     users: [
         { id: 101, email: "ufuk@uni.edu.tr", password: "123", role: "student", name: "Ufuk Buğra Şahin", student_no: "20202020" },
@@ -17,7 +22,7 @@ const INITIAL_STATE = {
         { id: 501, code: "BLG301", name: "Yazılım Mühendisliği", teacher_id: 102 },
         { id: 502, code: "BLG305", name: "Veritabanı Yönetimi", teacher_id: 102 },
     ],
-    active_session: null,
+    active_session: null, 
     records: []
 };
 
@@ -30,12 +35,12 @@ class AttendanceApp {
     }
 
     async init() {
-        this.updateStatus("Sistem Hazırlanıyor...");
+        this.updateStatus("SQL Sistemine Bağlanılıyor...");
         await this.syncFromCloud();
         this.setupEventListeners();
         this.handleRouting();
         this.startBackgroundPoller();
-        this.updateStatus("Sunucu Aktif", true);
+        this.updateStatus("Sistem Aktif (SQL)", true);
     }
 
     updateStatus(text, success = false) {
@@ -45,26 +50,31 @@ class AttendanceApp {
         if (pulse) pulse.style.background = success ? 'var(--success)' : 'var(--accent)';
     }
 
+    /**
+     * SQL CLOUD SYNC
+     */
     async syncFromCloud() {
         try {
             const response = await fetch(`${CONFIG.API_URL}?cache_bust=${Date.now()}`);
             if (response.ok) {
                 const cloudData = await response.json();
-                if (cloudData && cloudData.users) {
-                    const validEmails = INITIAL_STATE.users.map(u => u.email);
-                    cloudData.users = cloudData.users.filter(u => validEmails.includes(u.email));
-
-                    INITIAL_STATE.users.forEach(newUser => {
-                        const exists = cloudData.users.some(u => u.email === newUser.email);
-                        if (!exists) cloudData.users.push(newUser);
+                
+                // If the PHP returned actual users from SQL
+                if (cloudData && cloudData.users && cloudData.users.length > 0) {
+                    // Convert IDs to Numbers to ensure fixed matching
+                    cloudData.users.forEach(u => u.id = parseInt(u.id));
+                    cloudData.courses.forEach(c => {
+                        c.id = parseInt(c.id);
+                        c.teacher_id = parseInt(c.teacher_id);
                     });
-
+                    if (cloudData.records) {
+                        cloudData.records = cloudData.records.map(id => parseInt(id));
+                    }
                     this.db = cloudData;
-                } else {
+                } else if (cloudData && cloudData.first_run) {
+                    // If DB is empty, push initial state to SQL
                     await this.syncToCloud();
                 }
-            } else {
-                await this.syncToCloud();
             }
         } catch (e) {
             console.error("Sync Error:", e);
@@ -92,6 +102,9 @@ class AttendanceApp {
         }, CONFIG.POLL_INTERVAL);
     }
 
+    /**
+     * NAVIGATION & UI
+     */
     handleRouting() {
         const params = new URLSearchParams(window.location.search);
         const sessionQr = params.get('session');
@@ -110,7 +123,7 @@ class AttendanceApp {
         });
         const target = document.getElementById(viewId);
         if (target) target.classList.remove('hidden');
-
+        
         const nav = document.getElementById('nav-main');
         if (viewId === 'view-login') nav.classList.add('hidden');
         else nav.classList.remove('hidden');
@@ -124,20 +137,23 @@ class AttendanceApp {
         document.getElementById('login-password').value = "123";
     }
 
+    /**
+     * AUTHENTICATION
+     */
     async login() {
         const email = document.getElementById('login-email').value;
         const pass = document.getElementById('login-password').value;
-
+        
         this.updateStatus("Doğrulanıyor...");
-
         await this.syncFromCloud();
-
+        
         const user = this.db.users.find(u => u.email === email && u.password === pass);
-
+        
         if (user) {
             this.currentUser = user;
             this.showDashboard();
 
+            // Handle pending QR session
             const pendingSession = sessionStorage.getItem('pending_session');
             if (pendingSession && user.role === 'student') {
                 this.updateStatus("Yoklama İşleniyor...");
@@ -145,8 +161,8 @@ class AttendanceApp {
                 sessionStorage.removeItem('pending_session');
             }
         } else {
-            alert("Giriş Hatalı! Lütfen e-posta ve şifrenizi kontrol edin.");
-            this.updateStatus("Hata: Giriş Başarısız", false);
+            alert("Giriş Hatalı! Lütfen bilgilerinizi kontrol edin.");
+            this.updateStatus("Giriş Başarısız", false);
         }
     }
 
@@ -157,7 +173,7 @@ class AttendanceApp {
     showDashboard() {
         document.getElementById('user-display-name').innerText = this.currentUser.name;
         document.getElementById('user-display-role').innerText = this.currentUser.role === 'teacher' ? 'Profesör' : 'Öğrenci';
-
+        
         if (this.currentUser.role === 'teacher') {
             this.renderTeacherCourses();
             this.switchView('view-teacher');
@@ -166,6 +182,9 @@ class AttendanceApp {
         }
     }
 
+    /**
+     * TEACHER ACTIONS
+     */
     renderTeacherCourses() {
         const container = document.getElementById('teacher-courses');
         container.innerHTML = '';
@@ -184,7 +203,7 @@ class AttendanceApp {
         const pin = Math.floor(100000 + Math.random() * 900000).toString();
         const qrData = "ATTEND_" + Date.now();
         this.db.active_session = { course_id: course.id, qr_data: qrData, pin: pin, active: true };
-        this.db.records = [];
+        this.db.records = []; 
         await this.syncToCloud();
         document.getElementById('session-pin').innerText = pin;
         this.renderQRCode(qrData);
@@ -214,7 +233,7 @@ class AttendanceApp {
         }
         container.innerHTML = '';
         this.db.records.forEach(studentId => {
-            const s = this.db.users.find(u => u.id === studentId);
+            const s = this.db.users.find(u => u.id === parseInt(studentId));
             if (s) {
                 const item = document.createElement('div');
                 item.className = 'list-item';
@@ -224,6 +243,9 @@ class AttendanceApp {
         });
     }
 
+    /**
+     * STUDENT ACTIONS
+     */
     async startScan() {
         const container = document.getElementById('scanner-container');
         document.getElementById('btn-scan').classList.add('hidden');
