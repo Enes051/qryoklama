@@ -24,5 +24,5 @@ Tarayıcınızdan `frontend/index.html` dosyasını açın ve şu bilgilerle gir
 - Şifre: 123
 
 **Öğrenci Hesabı:**
-- E-posta: ufuk@uni.edu.tr (veya boran@uni.edu.tr, enes@uni.edu.tr)
+- E-posta: ufuk@uni.edu.tr boran@uni.edu.tr enes@uni.edu.tr
 - Şifre: 123
