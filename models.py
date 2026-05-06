@@ -1,10 +1,10 @@
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from datetime import datetime, timedelta, timezone
-from .database import Base
+from database import Base
 
-# Turkey Timezone (UTC+3)
 TRT = timezone(timedelta(hours=3))
+
 def get_now():
     return datetime.now(TRT)
 
@@ -15,8 +15,7 @@ class User(Base):
     name = Column(String, index=True)
     email = Column(String, unique=True, index=True)
     password_hash = Column(String)
-    role = Column(String) # 'student', 'teacher', 'admin'
-    
+    role = Column(String)  # 'student', 'teacher'
     student_no = Column(String, unique=True, index=True, nullable=True)
     department = Column(String, nullable=True)
 
@@ -27,7 +26,7 @@ class Course(Base):
     course_code = Column(String, unique=True, index=True)
     course_name = Column(String)
     teacher_id = Column(Integer, ForeignKey("users.id"))
-    
+
     teacher = relationship("User")
     sessions = relationship("AttendanceSession", back_populates="course")
 
@@ -38,6 +37,7 @@ class AttendanceSession(Base):
     course_id = Column(Integer, ForeignKey("courses.id"))
     date = Column(DateTime, default=get_now)
     qr_data = Column(String, unique=True, index=True)
+    pin = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
 
     course = relationship("Course", back_populates="sessions")

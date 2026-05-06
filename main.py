@@ -1,14 +1,12 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from typing import List
-import uuid
 
-import models, schemas, database
+import models, database
 
 models.Base.metadata.create_all(bind=database.engine)
 
-app = FastAPI(title="QR Attendance System API")
+app = FastAPI(title="QR Yoklama Sistemi")
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,104 +23,187 @@ def get_db():
     finally:
         db.close()
 
-@app.get("/")
-def read_root():
-    return {"message": "Welcome to QR Attendance System API"}
 
-@app.post("/users/register", response_model=schemas.User)
-def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    new_user = models.User(
-        name=user.name,
-        email=user.email,
-        password_hash=user.password, # DUMMY HASH
-        role=user.role,
-        student_no=user.student_no,
-        department=user.department
+# ── SYNC (PHP'nin yaptığı GET/POST'u karşılar) ──────────────────────────────
+
+@app.get("/sync")
+def sync_get(db: Session = Depends(get_db)):
+    users = db.query(models.User).all()
+
+    if not users:
+        return {"first_run": True}
+
+    courses = db.query(models.Course).all()
+
+    active_session_db = (
+        db.query(models.AttendanceSession)
+        .filter(models.AttendanceSession.is_active == True)
+        .order_by(models.AttendanceSession.date.desc())
+        .first()
     )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    return new_user
 
-@app.post("/users/login")
-def login(user: schemas.UserLogin, db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
-    if not db_user or db_user.password_hash != user.password:
-        raise HTTPException(status_code=400, detail="Invalid credentials")
-    
-    return {
-        "access_token": "dummy_token_for_presentation",
-        "token_type": "bearer",
-        "user": {
-            "id": db_user.id,
-            "name": db_user.name,
-            "role": db_user.role,
-            "student_no": db_user.student_no
+    active_session = None
+    records = []
+    if active_session_db:
+        active_session = {
+            "course_id": active_session_db.course_id,
+            "qr_data":   active_session_db.qr_data,
+            "pin":       active_session_db.pin,
+            "active":    True,
         }
+        records = [
+            r.student_id
+            for r in db.query(models.AttendanceRecord)
+            .filter(models.AttendanceRecord.session_id == active_session_db.id)
+            .all()
+        ]
+
+    return {
+        "users": [
+            {
+                "id":         u.id,
+                "name":       u.name,
+                "email":      u.email,
+                "password":   u.password_hash,
+                "role":       u.role,
+                "student_no": u.student_no,
+                "department": u.department,
+            }
+            for u in users
+        ],
+        "courses": [
+            {
+                "id":         c.id,
+                "code":       c.course_code,
+                "name":       c.course_name,
+                "teacher_id": c.teacher_id,
+            }
+            for c in courses
+        ],
+        "active_session": active_session,
+        "records": records,
     }
 
-@app.post("/courses", response_model=schemas.Course)
-def create_course(course: schemas.CourseCreate, db: Session = Depends(get_db)):
-    db_course = models.Course(**course.dict())
-    db.add(db_course)
-    db.commit()
-    db.refresh(db_course)
-    return db_course
 
-@app.get("/courses", response_model=List[schemas.Course])
-def get_courses(db: Session = Depends(get_db)):
-    return db.query(models.Course).all()
+@app.post("/sync")
+def sync_post(data: dict, db: Session = Depends(get_db)):
+    # İlk çalıştırmada kullanıcı/ders yükle
+    if "users" in data and data["users"]:
+        for u in data["users"]:
+            if not db.query(models.User).filter(models.User.id == int(u["id"])).first():
+                db.add(models.User(
+                    id=int(u["id"]),
+                    name=u["name"],
+                    email=u["email"],
+                    password_hash=u.get("password", ""),
+                    role=u["role"],
+                    student_no=u.get("student_no"),
+                    department=u.get("department"),
+                ))
+        db.commit()
 
-@app.post("/attendance/session", response_model=schemas.AttendanceSession)
-def create_session(course_id: int, db: Session = Depends(get_db)):
-    qr_data = str(uuid.uuid4())
-    db_session = models.AttendanceSession(course_id=course_id, qr_data=qr_data)
-    db.add(db_session)
-    db.commit()
-    db.refresh(db_session)
-    return db_session
+    if "courses" in data and data["courses"]:
+        for c in data["courses"]:
+            if not db.query(models.Course).filter(models.Course.id == int(c["id"])).first():
+                db.add(models.Course(
+                    id=int(c["id"]),
+                    course_code=c.get("code", c.get("course_code", "")),
+                    course_name=c.get("name", c.get("course_name", "")),
+                    teacher_id=int(c["teacher_id"]),
+                ))
+        db.commit()
 
-@app.post("/attendance/scan")
-def scan_qr_code(scan_data: schemas.AttendanceRecordCreate, db: Session = Depends(get_db)):
-    session = db.query(models.AttendanceSession).filter(
-        models.AttendanceSession.qr_data == scan_data.qr_data,
-        models.AttendanceSession.is_active == True
-    ).first()
-    
-    if not session:
-        raise HTTPException(status_code=404, detail="Invalid or expired QR code")
-    
-    existing_record = db.query(models.AttendanceRecord).filter(
-        models.AttendanceRecord.session_id == session.id,
-        models.AttendanceRecord.student_id == scan_data.student_id
-    ).first()
-    
-    if existing_record:
-        return {"message": "Attendance already recorded"}
+    active_session = data.get("active_session")
+    records = data.get("records", [])
 
-    new_record = models.AttendanceRecord(
-        session_id=session.id,
-        student_id=scan_data.student_id
+    if active_session is None:
+        db.query(models.AttendanceSession).filter(
+            models.AttendanceSession.is_active == True
+        ).update({"is_active": False})
+        db.commit()
+        return {"status": "success", "message": "Oturum kapatıldı"}
+
+    qr_data = active_session["qr_data"]
+    existing = (
+        db.query(models.AttendanceSession)
+        .filter(models.AttendanceSession.qr_data == qr_data)
+        .first()
     )
-    db.add(new_record)
-    db.commit()
-    return {"message": "Attendance recorded successfully"}
 
-@app.get("/attendance/session/{session_id}/records")
-def get_session_records(session_id: int, db: Session = Depends(get_db)):
-    records = db.query(models.AttendanceRecord).filter(models.AttendanceRecord.session_id == session_id).all()
+    if not existing:
+        db.query(models.AttendanceSession).filter(
+            models.AttendanceSession.is_active == True
+        ).update({"is_active": False})
+        db.commit()
+
+        session_obj = models.AttendanceSession(
+            course_id=int(active_session["course_id"]),
+            qr_data=qr_data,
+            pin=active_session.get("pin"),
+            is_active=True,
+        )
+        db.add(session_obj)
+        db.commit()
+        db.refresh(session_obj)
+        session_id = session_obj.id
+    else:
+        session_id = existing.id
+
+    for student_id in records:
+        sid = int(student_id)
+        if not db.query(models.AttendanceRecord).filter(
+            models.AttendanceRecord.session_id == session_id,
+            models.AttendanceRecord.student_id == sid,
+        ).first():
+            db.add(models.AttendanceRecord(session_id=session_id, student_id=sid))
+
+    db.commit()
+    return {"status": "success", "message": "Senkronize edildi"}
+
+
+# ── ÖĞRETMEN GEÇMİŞ ─────────────────────────────────────────────────────────
+
+@app.get("/teacher/{teacher_id}/history")
+def teacher_history(teacher_id: int, db: Session = Depends(get_db)):
+    courses = db.query(models.Course).filter(models.Course.teacher_id == teacher_id).all()
+    course_map = {c.id: c for c in courses}
+
+    sessions = (
+        db.query(models.AttendanceSession)
+        .filter(models.AttendanceSession.course_id.in_(list(course_map.keys())))
+        .order_by(models.AttendanceSession.date.desc())
+        .all()
+    )
+
     result = []
-    for r in records:
-        student = db.query(models.User).filter(models.User.id == r.student_id).first()
+    for s in sessions:
+        course = course_map.get(s.course_id)
+        attendance_records = (
+            db.query(models.AttendanceRecord)
+            .filter(models.AttendanceRecord.session_id == s.id)
+            .all()
+        )
+
+        attendees = []
+        for r in attendance_records:
+            student = db.query(models.User).filter(models.User.id == r.student_id).first()
+            if student:
+                attendees.append({
+                    "id":         student.id,
+                    "name":       student.name,
+                    "student_no": student.student_no or "",
+                })
+
         result.append({
-            "record_id": r.id,
-            "student_name": student.name if student else "Unknown",
-            "student_no": student.student_no if student else "Unknown",
-            "timestamp": r.timestamp,
-            "status": r.status
+            "session_id":    s.id,
+            "course_code":   course.course_code if course else "",
+            "course_name":   course.course_name if course else "",
+            "date":          s.date.strftime("%d.%m.%Y %H:%M") if s.date else "",
+            "is_active":     s.is_active,
+            "attendee_count": len(attendees),
+            "attendees":     attendees,
         })
+
     return result
+
+
